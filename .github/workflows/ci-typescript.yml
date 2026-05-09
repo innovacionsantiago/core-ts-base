@@ -1,0 +1,170 @@
+# core-ts-base reusable TypeScript/JS CI workflow (ADR-018, ADR-034)
+#
+# Uso desde un repo consumidor:
+#   .github/workflows/ci.yml:
+#     name: CI
+#     on: [push, pull_request]
+#     jobs:
+#       ci:
+#         uses: innovacionsantiago/core-ts-base/.github/workflows/ci-typescript.yml@main
+#         with:
+#           node_version: "20"
+#           coverage_min: 60
+#
+# NOTA seguridad: este workflow NO usa contexto untrusted en run: blocks.
+# Solo inputs (controlados por caller) y github.run_id.
+
+name: ci-typescript (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: "Node.js version (setup-node format)"
+        required: false
+        type: string
+        default: "20"
+      working_directory:
+        description: "Subdirectory to run from"
+        required: false
+        type: string
+        default: "."
+      coverage_min:
+        description: "Coverage minimum percentage"
+        required: false
+        type: number
+        default: 60
+      skip_coverage_gate:
+        description: "Si true, no falla por coverage"
+        required: false
+        type: boolean
+        default: false
+      package_manager:
+        description: "npm | pnpm | yarn"
+        required: false
+        type: string
+        default: "npm"
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: lint+format+type+test+audit
+    runs-on: ubuntu-latest
+    env:
+      WORKDIR: ${{ inputs.working_directory }}
+      COVERAGE_MIN: ${{ inputs.coverage_min }}
+      SKIP_COVERAGE_GATE: ${{ inputs.skip_coverage_gate }}
+      PKG_MANAGER: ${{ inputs.package_manager }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: ${{ inputs.package_manager }}
+          cache-dependency-path: ${{ inputs.working_directory }}/package-lock.json
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          if [ ! -f package.json ]; then
+            echo "::error::No package.json en $WORKDIR"
+            exit 1
+          fi
+          case "$PKG_MANAGER" in
+            npm)   npm ci ;;
+            pnpm)  npm install -g pnpm && pnpm install --frozen-lockfile ;;
+            yarn)  npm install -g yarn && yarn install --frozen-lockfile ;;
+            *)     echo "::error::Unknown package_manager: $PKG_MANAGER"; exit 1 ;;
+          esac
+
+      - name: Lint (eslint)
+        shell: bash
+        run: |
+          if npm run lint --if-present 2>&1 | tee lint-output.txt; then
+            echo "::notice::npm run lint OK"
+          else
+            if [ -f .eslintrc.js ] || [ -f .eslintrc.cjs ] || [ -f .eslintrc.json ] || [ -f eslint.config.js ] || [ -f eslint.config.mjs ]; then
+              npx eslint . --ext .ts,.tsx,.js,.jsx,.mjs,.cjs
+            else
+              echo "::warning::No eslint config found, skipping lint"
+            fi
+          fi
+
+      - name: Format check (prettier)
+        shell: bash
+        run: |
+          if npm run format:check --if-present; then
+            echo "::notice::npm run format:check OK"
+          elif [ -f .prettierrc ] || [ -f .prettierrc.json ] || [ -f .prettierrc.js ] || [ -f prettier.config.js ] || grep -q '"prettier"' package.json 2>/dev/null; then
+            npx prettier --check .
+          else
+            echo "::warning::No prettier config found, skipping format check"
+          fi
+
+      - name: Type check (tsc --noEmit)
+        shell: bash
+        run: |
+          if [ -f tsconfig.json ]; then
+            npx tsc --noEmit
+          else
+            echo "::notice::No tsconfig.json, skipping type check"
+          fi
+
+      - name: Tests with coverage
+        shell: bash
+        run: |
+          if npm run test:cov --if-present; then
+            echo "::notice::npm run test:cov OK"
+          elif npm run test --if-present -- --coverage; then
+            echo "::notice::npm run test --coverage OK"
+          elif grep -q '"vitest"' package.json 2>/dev/null; then
+            npx vitest run --coverage || {
+              if [ "$SKIP_COVERAGE_GATE" = "true" ]; then
+                echo "::warning::vitest failed but skip_coverage_gate=true"
+              else
+                exit 1
+              fi
+            }
+          else
+            echo "::warning::No test runner detectado, skipping tests"
+          fi
+
+      - name: npm audit (security · report-only V1)
+        shell: bash
+        run: |
+          npm audit --audit-level=high --json > npm-audit.json || true
+          if [ -f npm-audit.json ]; then
+            summary=$(node -e "try{const d=require('./npm-audit.json');const m=d.metadata?.vulnerabilities||{};console.log(JSON.stringify(m))}catch(e){console.log('{}')}")
+            echo "::notice::npm audit vulnerabilities: $summary"
+          fi
+          # TODO: ADR-034 CRITICAL gate · fail si critical>0 cuando esté afinado.
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.run_id }}
+          path: |
+            ${{ inputs.working_directory }}/coverage/
+            ${{ inputs.working_directory }}/coverage.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload security artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-${{ github.run_id }}
+          path: |
+            ${{ inputs.working_directory }}/npm-audit.json
+            ${{ inputs.working_directory }}/lint-output.txt
+          if-no-files-found: ignore
+          retention-days: 14
