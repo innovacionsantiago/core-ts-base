@@ -1,0 +1,18 @@
+# Dependabot config · core-ts-base (T0 · daily)
+# Lección post CVE-2025-55182 cryptominer (incidente 2026-05-08):
+#   detección reactiva via cis-cve-scan llegó tarde · Dependabot proactivo
+#   abre PRs apenas hay CVE / minor / patch upstream.
+# Auto-merge plan documentado en core-deploy/docs/dependabot-auto-merge.md.
+version: 2
+updates:
+  # github-actions only · este repo es tooling base sin package.json root.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - automated
+    commit-message:
+      prefix: chore(deps)
