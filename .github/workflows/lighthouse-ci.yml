@@ -1,0 +1,214 @@
+# core-ts-base reusable Lighthouse CI workflow (W17, ADR-018, ADR-034)
+#
+# Runs treosh/lighthouse-ci-action@v11 against one or more URLs of a
+# preview / staging deploy and (optionally) compares against a baseline
+# stored at `baseline_path` (default: data/lighthouse-baseline.json).
+#
+# Security note: this workflow does NOT interpolate any github.event.*
+# (untrusted) context into run: blocks. Only `inputs.*` (vetted by the
+# caller's workflow_call) and env vars are used.
+#
+# Usage from a consumer repo:
+#   .github/workflows/lighthouse.yml:
+#     name: Lighthouse
+#     on:
+#       pull_request:
+#       push:
+#         branches: [main]
+#     jobs:
+#       lighthouse:
+#         uses: innovacionsantiago/core-ts-base/.github/workflows/lighthouse-ci.yml@main
+#         with:
+#           urls: |
+#             https://staging.example.com/
+#             https://staging.example.com/about
+#           baseline_path: data/lighthouse-baseline.json
+#           regression_threshold: 10
+#
+# Rules:
+#   - Fails if ANY score (perf/a11y/seo/best-practices) drops more than
+#     `regression_threshold` points vs the baseline (default 10).
+#   - If no baseline exists, does not fail — just publishes the scores.
+
+name: lighthouse-ci (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      urls:
+        description: "URLs to scan (one per line, multiline string)"
+        required: true
+        type: string
+      node_version:
+        description: "Node.js version"
+        required: false
+        type: string
+        default: "20"
+      runs:
+        description: "Lighthouse runs per URL (median taken)"
+        required: false
+        type: number
+        default: 1
+      baseline_path:
+        description: "Path (in repo) to JSON baseline of category scores"
+        required: false
+        type: string
+        default: "data/lighthouse-baseline.json"
+      regression_threshold:
+        description: "Fail if any score drops more than N points vs baseline"
+        required: false
+        type: number
+        default: 10
+      working_directory:
+        description: "Subdirectory the workflow checks out"
+        required: false
+        type: string
+        default: "."
+      categories:
+        description: "Comma-separated lighthouse categories"
+        required: false
+        type: string
+        default: "performance,accessibility,seo,best-practices"
+      skip_regression_gate:
+        description: "If true, do not fail on regression (report-only)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  lighthouse:
+    name: lighthouse + regression gate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Run Lighthouse CI (treosh)
+        id: lhci
+        uses: treosh/lighthouse-ci-action@v11
+        with:
+          urls: ${{ inputs.urls }}
+          uploadArtifacts: true
+          temporaryPublicStorage: false
+          runs: ${{ inputs.runs }}
+
+      - name: Extract median scores
+        id: extract
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d .lighthouseci ]; then
+            echo "::error::No .lighthouseci directory found"
+            exit 1
+          fi
+          node - <<'NODE_EOF' > scores.json
+          const fs = require('fs');
+          const path = require('path');
+          const dir = '.lighthouseci';
+          const manifest = path.join(dir, 'manifest.json');
+          const out = {};
+          if (fs.existsSync(manifest)) {
+            const items = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+            for (const it of items) {
+              if (!it.isRepresentativeRun) continue;
+              const data = JSON.parse(fs.readFileSync(it.jsonPath, 'utf8'));
+              const cats = data.categories || {};
+              const url = data.finalDisplayedUrl || data.requestedUrl || it.url;
+              out[url] = {};
+              for (const [k, v] of Object.entries(cats)) {
+                out[url][k] = v && typeof v.score === 'number' ? Math.round(v.score * 100) : null;
+              }
+            }
+          }
+          process.stdout.write(JSON.stringify(out, null, 2));
+          NODE_EOF
+          echo "Scores extracted:"
+          cat scores.json
+
+      - name: Compare with baseline
+        id: gate
+        shell: bash
+        env:
+          BASELINE_PATH: ${{ inputs.baseline_path }}
+          THRESHOLD: ${{ inputs.regression_threshold }}
+          SKIP_GATE: ${{ inputs.skip_regression_gate }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$BASELINE_PATH" ]; then
+            echo "::notice::No baseline at $BASELINE_PATH - capturing this run as advisory only"
+            echo "regressed=false" >> "$GITHUB_OUTPUT"
+            cp scores.json "lighthouse-suggested-baseline.json"
+            exit 0
+          fi
+          node - <<'NODE_EOF'
+          const fs = require('fs');
+          const baseline = JSON.parse(fs.readFileSync(process.env.BASELINE_PATH, 'utf8'));
+          const current  = JSON.parse(fs.readFileSync('scores.json', 'utf8'));
+          const threshold = Number(process.env.THRESHOLD);
+          const skip = process.env.SKIP_GATE === 'true';
+          let regressed = false;
+          const lines = [];
+
+          // Baseline shape: {url:{cat:n}} OR cis-qa style {results:[{url,scores,skipped}]}.
+          let baseMap = baseline;
+          if (Array.isArray(baseline.results)) {
+            baseMap = {};
+            for (const r of baseline.results) {
+              if (r.skipped) continue;
+              baseMap[r.url] = r.scores;
+            }
+          }
+
+          for (const [url, cats] of Object.entries(current)) {
+            const base = baseMap[url];
+            if (!base) {
+              lines.push("  - " + url + ": no baseline entry, skipping");
+              continue;
+            }
+            for (const [cat, score] of Object.entries(cats)) {
+              if (score == null) continue;
+              const baseScore = base[cat];
+              if (baseScore == null) continue;
+              const delta = score - baseScore;
+              const sign = delta >= 0 ? '+' : '';
+              const flag = delta <= -threshold ? 'FAIL' : (delta < 0 ? 'WARN' : 'OK');
+              lines.push("  - " + url + " [" + cat + "]: " + baseScore + " -> " + score + " (" + sign + delta + ") " + flag);
+              if (delta <= -threshold) regressed = true;
+            }
+          }
+          console.log('Lighthouse regression report:');
+          console.log(lines.join('\n'));
+          fs.writeFileSync('regression-report.txt', lines.join('\n'));
+          if (regressed && !skip) {
+            console.log("::error::At least one score regressed by more than " + threshold + " points");
+            process.exit(1);
+          }
+          if (regressed) {
+            console.log("::warning::Regression detected but skip_regression_gate=true");
+          }
+          NODE_EOF
+
+      - name: Upload lighthouse artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-${{ github.run_id }}
+          path: |
+            ${{ inputs.working_directory }}/.lighthouseci/
+            ${{ inputs.working_directory }}/scores.json
+            ${{ inputs.working_directory }}/regression-report.txt
+            ${{ inputs.working_directory }}/lighthouse-suggested-baseline.json
+          if-no-files-found: ignore
+          retention-days: 30

@@ -6,6 +6,49 @@ Sibling de `core-python-base`. ADR-018 extendido a TS.
 
 ## Workflows disponibles
 
+### `lighthouse-ci.yml`
+
+Reusable Lighthouse CI workflow (W17). Wraps `treosh/lighthouse-ci-action@v11`,
+captures category scores, and gates regressions vs an in-repo baseline.
+
+**Inputs**:
+
+| Input | Required | Default | Descripción |
+|---|---|---|---|
+| `urls` | yes | — | URLs to scan (multiline string, one per line) |
+| `node_version` | no | `"20"` | setup-node version |
+| `runs` | no | `1` | Lighthouse runs per URL (median) |
+| `baseline_path` | no | `data/lighthouse-baseline.json` | JSON baseline of category scores |
+| `regression_threshold` | no | `10` | Fail if any score drops more than N points vs baseline |
+| `working_directory` | no | `"."` | Subdir del repo |
+| `categories` | no | `performance,accessibility,seo,best-practices` | Lighthouse categories |
+| `skip_regression_gate` | no | `false` | Report-only mode |
+
+Baseline format accepted:
+- Object map: `{ "https://x.test/": { "performance": 92, ... } }`.
+- cis-qa baseline: `{ "results": [ { "url": "...", "scores": {...}, "skipped": false } ] }`.
+
+Usage example (a Next.js app on a preview deploy):
+
+```yaml
+name: Lighthouse
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  lighthouse:
+    uses: innovacionsantiago/core-ts-base/.github/workflows/lighthouse-ci.yml@main
+    with:
+      urls: |
+        https://staging.example.com/
+        https://staging.example.com/dashboard
+      regression_threshold: 10
+```
+
+Artifacts uploaded: `.lighthouseci/`, `scores.json`, `regression-report.txt`,
+and `lighthouse-suggested-baseline.json` (only when no baseline exists yet).
+
 ### `ci-typescript.yml`
 
 Lint + format + type + test + npm-audit reusable.
