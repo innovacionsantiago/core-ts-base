@@ -21,6 +21,10 @@ export interface ConsentStore {
   read(): ConsentState
   canLoad(category: ConsentCategory): boolean
   setCategory(category: OptionalConsentCategory, decision: 'accepted' | 'rejected'): ConsentState
+  setDecisions(decisions: {
+    analytics: 'accepted' | 'rejected'
+    diagnostics: 'accepted' | 'rejected'
+  }): ConsentState
   clear(): ConsentState
   subscribe(listener: (state: ConsentState) => void): () => void
 }

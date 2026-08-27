@@ -37,6 +37,13 @@ consent.setCategory('analytics', 'accepted')
 // analytics.dispose() al desmontar la aplicación
 ```
 
+Los botones globales deben persistir ambas categorías de forma atómica, para evitar estados
+intermedios y dos anuncios de cambio:
+
+```js
+consent.setDecisions({ analytics: 'rejected', diagnostics: 'rejected' })
+```
+
 ## Configuración apagada
 
 Un consumidor parte con `provider: none`, IDs y endpoints nulos. `validateTelemetrySiteConfig`

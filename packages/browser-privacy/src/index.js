@@ -74,16 +74,36 @@ export function createConsentStore(options = {}) {
       throw new Error(`invalid consent decision: ${decision}`)
     }
     const current = read()
-    storage.setItem(storageKey, JSON.stringify({
-      version: CONSENT_VERSION,
+    return persistDecisions({
       analytics: current.analytics,
       diagnostics: current.diagnostics,
       [category]: decision,
+    })
+  }
+
+  function persistDecisions(decisions) {
+    storage.setItem(storageKey, JSON.stringify({
+      version: CONSENT_VERSION,
+      analytics: decisions.analytics,
+      diagnostics: decisions.diagnostics,
       decidedAt: now(),
     }))
     const state = read()
     emit(state)
     return state
+  }
+
+  function setDecisions(decisions) {
+    if (!decisions || typeof decisions !== 'object') {
+      throw new Error('consent decisions must be an object')
+    }
+    if (!['accepted', 'rejected'].includes(decisions.analytics)) {
+      throw new Error('analytics decision must be accepted or rejected')
+    }
+    if (!['accepted', 'rejected'].includes(decisions.diagnostics)) {
+      throw new Error('diagnostics decision must be accepted or rejected')
+    }
+    return persistDecisions(decisions)
   }
 
   function clear() {
@@ -105,7 +125,7 @@ export function createConsentStore(options = {}) {
     return () => events.removeEventListener(CONSENT_EVENT, handleChange)
   }
 
-  return Object.freeze({ canLoad, clear, read, setCategory, subscribe, storageKey })
+  return Object.freeze({ canLoad, clear, read, setCategory, setDecisions, subscribe, storageKey })
 }
 
 export function createConsentGate({ category, store, start, onError = () => {} }) {

@@ -73,6 +73,32 @@ test('persiste decisiones por categoría y publica el estado completo', () => {
   assert.equal(observed.at(-1).diagnostics, 'rejected')
 })
 
+test('persiste una elección completa en una sola operación y emite un solo cambio', () => {
+  const { events, storage, store } = createHarness()
+  const observed = []
+  events.addEventListener(CONSENT_EVENT, (event) => observed.push(event.detail))
+
+  const state = store.setDecisions({
+    analytics: 'rejected',
+    diagnostics: 'accepted',
+  })
+
+  assert.deepEqual(state, {
+    version: 1,
+    necessary: 'accepted',
+    analytics: 'rejected',
+    diagnostics: 'accepted',
+    decidedAt: '2026-08-27T12:00:00.000Z',
+  })
+  assert.deepEqual(JSON.parse(storage.getItem(DEFAULT_STORAGE_KEY)), {
+    version: 1,
+    analytics: 'rejected',
+    diagnostics: 'accepted',
+    decidedAt: '2026-08-27T12:00:00.000Z',
+  })
+  assert.equal(observed.length, 1)
+})
+
 test('ignora storage corrupto o de otra versión y nunca acepta necessary rechazado', () => {
   const { storage, store } = createHarness()
   storage.setItem(DEFAULT_STORAGE_KEY, '{no-json')
