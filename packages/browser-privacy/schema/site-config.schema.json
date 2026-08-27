@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://innovacionsantiago.cl/schemas/browser-privacy/site-config.v1.json",
+  "title": "Configuración de privacidad y telemetría de navegador",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "site", "storageScope", "analytics", "diagnostics"],
+  "properties": {
+    "schemaVersion": { "const": "cis.browser-privacy.site.v1" },
+    "site": { "type": "string", "minLength": 1 },
+    "storageScope": { "const": "origin" },
+    "analytics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "siteId", "endpoint", "owner", "retentionDays"],
+      "properties": {
+        "provider": { "enum": ["none", "first-party"] },
+        "siteId": { "type": ["string", "null"] },
+        "endpoint": { "type": ["string", "null"] },
+        "owner": { "type": ["string", "null"] },
+        "retentionDays": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "classification", "dsnPublicConfigured", "owner"],
+      "properties": {
+        "provider": { "enum": ["none", "glitchtip"] },
+        "classification": { "enum": ["pending", "necessary", "optional"] },
+        "dsnPublicConfigured": { "type": "boolean" },
+        "owner": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

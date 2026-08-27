@@ -1,0 +1,32 @@
+name: Browser privacy
+
+on:
+  push:
+    paths:
+      - "packages/browser-privacy/**"
+      - ".github/workflows/browser-privacy.yml"
+  pull_request:
+    paths:
+      - "packages/browser-privacy/**"
+      - ".github/workflows/browser-privacy.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Pruebas del contrato
+        working-directory: packages/browser-privacy
+        run: npm test
+      - name: Superficie publicable
+        working-directory: packages/browser-privacy
+        run: npm pack --dry-run

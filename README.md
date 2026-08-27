@@ -4,6 +4,22 @@
 
 Sibling de `core-python-base`. ADR-018 extendido a TS.
 
+## Paquetes compartidos
+
+### `@cis/browser-privacy`
+
+`packages/browser-privacy` publica el contrato C1.1 de consentimiento y telemetría opcional para
+navegadores. Parte con analytics y diagnóstico apagados, guarda decisiones por origen, aborta sinks
+al revocar y rechaza IDs o endpoints cuando el proveedor declarado es `none`.
+
+```sh
+cd packages/browser-privacy
+npm test
+```
+
+El paquete no incluye una UI ni activa proveedores. Véase
+[`packages/browser-privacy/README.md`](packages/browser-privacy/README.md).
+
 ## Workflows disponibles
 
 ### `ci-typescript.yml`
