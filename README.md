@@ -6,6 +6,49 @@ Sibling de `core-python-base`. ADR-018 extendido a TS.
 
 ## Workflows disponibles
 
+### `lighthouse-ci.yml`
+
+Reusable Lighthouse CI workflow (W17). Wraps `treosh/lighthouse-ci-action@v11`,
+captures category scores, and gates regressions vs an in-repo baseline.
+
+**Inputs**:
+
+| Input | Required | Default | Descripción |
+|---|---|---|---|
+| `urls` | yes | — | URLs to scan (multiline string, one per line) |
+| `node_version` | no | `"20"` | setup-node version |
+| `runs` | no | `1` | Lighthouse runs per URL (median) |
+| `baseline_path` | no | `data/lighthouse-baseline.json` | JSON baseline of category scores |
+| `regression_threshold` | no | `10` | Fail if any score drops more than N points vs baseline |
+| `working_directory` | no | `"."` | Subdir del repo |
+| `categories` | no | `performance,accessibility,seo,best-practices` | Lighthouse categories |
+| `skip_regression_gate` | no | `false` | Report-only mode |
+
+Baseline format accepted:
+- Object map: `{ "https://x.test/": { "performance": 92, ... } }`.
+- cis-qa baseline: `{ "results": [ { "url": "...", "scores": {...}, "skipped": false } ] }`.
+
+Usage example (a Next.js app on a preview deploy):
+
+```yaml
+name: Lighthouse
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  lighthouse:
+    uses: innovacionsantiago/core-ts-base/.github/workflows/lighthouse-ci.yml@main
+    with:
+      urls: |
+        https://staging.example.com/
+        https://staging.example.com/dashboard
+      regression_threshold: 10
+```
+
+Artifacts uploaded: `.lighthouseci/`, `scores.json`, `regression-report.txt`,
+and `lighthouse-suggested-baseline.json` (only when no baseline exists yet).
+
 ### `ci-typescript.yml`
 
 Lint + format + type + test + npm-audit reusable.
@@ -14,7 +57,7 @@ Lint + format + type + test + npm-audit reusable.
 
 | Input | Required | Default | Descripción |
 |---|---|---|---|
-| `node_version` | no | `"20"` | setup-node version |
+| `node_version` | no | `"22"` | setup-node version |
 | `working_directory` | no | `"."` | Subdir del repo |
 | `coverage_min` | no | `60` | Threshold coverage |
 | `skip_coverage_gate` | no | `false` | No falla si coverage<threshold |
@@ -46,13 +89,13 @@ jobs:
   ci:
     uses: innovacionsantiago/core-ts-base/.github/workflows/ci-typescript.yml@main
     with:
-      node_version: "20"
+      node_version: "22"
       coverage_min: 60
 ```
 
 ## Convenciones que esto impone
 
-- **Node 20 LTS** (target). Servicios nuevos: 20 explícito.
+- **Node 22 LTS** (target). Servicios nuevos: 22 explícito.
 - **eslint + prettier** como tooling base. Si el repo no los tiene configurados, el step se warn-skipea.
 - **vitest** como test runner default (preferido sobre jest por ESM-native + speed).
 - **tsc --noEmit** como type-check independiente del bundler.
@@ -71,8 +114,9 @@ Recomendados en `package.json` para que el workflow los detecte:
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:cov": "vitest run --coverage",
+    "i18n:check": "cis-i18n check messages",
+    "test": "npm run i18n:check && vitest run",
+    "test:cov": "npm run i18n:check && vitest run --coverage",
     "test:watch": "vitest"
   }
 }
@@ -91,3 +135,36 @@ Recomendados en `package.json` para que el workflow los detecte:
 - `core-python-base` — sibling Python.
 - `core-deploy/cd-vps-cis.yml` — deploy workflow (TS sites usan template `post_deploy.ts.sh`).
 - ADR-018 (Python project standard, conceptos extensibles a TS).
+
+## Idiomas en proyectos nuevos
+
+Copia también `messages/` e `i18n.config.json` al crear un servicio. La lista
+habilitada inicial es `["es", "en"]`. Para ampliarla agrega códigos del
+[contrato canónico](../core-i18n/README.md#locales-y-rutas), traduce los
+catálogos base con Claude y pasa la configuración a los helpers. JSON no
+admite comentarios; las instrucciones de ampliación viven aquí.
+
+El catálogo mínimo contiene `app.name = "{name}"`: un parámetro de marca sin
+prosa que traducir, idéntico en los dos idiomas. Codex escribe solamente el
+español fuente. Cuando agregues textos, Claude completa los otros catálogos con
+`cis-i18n missing`, `merge` y `check`. No copies el español como traducción.
+El check bloquea si falta una clave en inglés, aunque el runtime use fallback.
+
+Node 22 es necesario para la CLI, también en servicios Python. El paquete no
+está publicado en npm: construye el commit 59123818f634 de core-i18n y copia su
+tarball privado en `vendor/cis-i18n-0.2.0.tgz` del consumidor, conservándolo
+en Git para que CI sea reproducible. El patrón `file:vendor/…` ya lo usa
+`cis-usaia/frontend-v2` para `@cis/github` y `@cis/browser-privacy`.
+No uses un checkout Node Git sin construir `dist/`.
+
+```sh
+mkdir -p vendor
+cp /srv/projects/core/core-i18n/.tmp/cis-i18n-0.2.0.tgz vendor/
+```
+
+Los textos visibles, metadatos y atributos accesibles se leen con el helper
+del stack; los formatos usan el locale y el HTML declara `lang` y `dir`.
+No se modifica el kit. Sigue el [canon de idiomas](../../CANON.md#idiomas-i18n-decisión-martín-2026-10-08).
+
+Después de copiar `package.json.template`, ejecuta `npm install` y conserva
+`package-lock.json`. `npm test` y `npm run test:cov` incluyen `i18n:check`.

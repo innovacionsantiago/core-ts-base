@@ -5,20 +5,21 @@
   "description": "TODO breve descripción del servicio",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "lint": "eslint .",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:cov": "vitest run --coverage",
+    "test": "npm run i18n:check && vitest run",
+    "test:cov": "npm run i18n:check && vitest run --coverage",
     "test:watch": "vitest",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "i18n:check": "cis-i18n check messages"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "@vitest/coverage-v8": "^1.0.0",
@@ -26,5 +27,8 @@
     "prettier": "^3.2.0",
     "typescript": "^5.4.0",
     "vitest": "^1.0.0"
+  },
+  "dependencies": {
+    "@cis/i18n": "file:vendor/cis-i18n-0.2.0.tgz"
   }
 }
